@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>通话状态诊断</title>
+<style>
+:root{--bg:#F2F1ED;--ink:#22242A;--ink2:#585D69;--ink3:#8A8F9B;--line:rgba(34,36,42,.12)}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:var(--bg);color:var(--ink);
+ font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.w{max-width:640px;margin:0 auto;padding:0 16px}
+header{padding:34px 0 18px;border-bottom:1px solid var(--line);margin-bottom:18px}
+header .k{font:600 10px/1 ui-monospace,monospace;letter-spacing:.24em;color:var(--ink3)}
+header h1{margin:12px 0 8px;font-size:22px;font-weight:800}
+header p{margin:0;color:var(--ink2);font-size:13px}
+.card{margin:14px 0;padding:14px 16px;border:1.5px solid #2A2721;background:#FFFEFC;box-shadow:4px 4px 0 rgba(42,39,33,.18)}
+.card h2{margin:0 0 10px;font:800 14px/1}
+.row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed rgba(42,39,33,.16);font-size:12.5px}
+.row:last-child{border:0}
+.row b{font-weight:700;text-align:right;word-break:break-all}
+.ok{color:#1B7A4B}.bad{color:#B4453A;font-weight:800}.warn{color:#A9761B}
+pre{margin:8px 0 0;padding:10px;background:#F6F5F1;border:1px solid var(--line);
+ font:11px/1.6 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto}
+.btn{display:block;width:100%;margin-top:12px;padding:12px 0;border:1.5px solid #2A2721;background:#fff;
+ color:#2A2721;font-size:13px;font-weight:800;cursor:pointer;box-shadow:4px 4px 0 #B4453A}
+.btn.safe{box-shadow:4px 4px 0 #1B7A4B}
+.hint{margin:10px 0 0;color:var(--ink2);font-size:12px;line-height:1.7}
+</style>
+</head>
+<body><div class="w">
+<header>
+  <div class="k">MÖBIUS · CALL STATE DIAG</div>
+  <h1>通话状态诊断</h1>
+  <p>用来查「挂断后仍显示通话中」的真实原因。<b>把这个文件和 index.html 放同一目录</b>，用同一个浏览器打开。</p>
+</header>
+
+<div class="card">
+  <h2>1 · localStorage 活跃会话</h2>
+  <div id="ls"></div>
+</div>
+
+<div class="card">
+  <h2>2 · 结束标记</h2>
+  <div id="ended"></div>
+</div>
+
+<div class="card">
+  <h2>3 · 安全快照 / 删除标记</h2>
+  <div id="safe"></div>
+  <p class="hint">存储层会给每个键留一份「安全快照」。如果活跃会话被删了、但快照还在且没有删除标记，启动脚本会把它<b>复活</b> —— 这是最可能的原因。</p>
+</div>
+
+<div class="card">
+  <h2>4 · IndexedDB 镜像</h2>
+  <div id="idb"></div>
+</div>
+
+<div class="card">
+  <h2>5 · 判定</h2>
+  <div id="verdict"></div>
+  <button class="btn" id="fix">彻底清除通话状态</button>
+  <p class="hint">这个按钮会清掉活跃会话、安全快照、IndexedDB 镜像，并写入删除标记。只影响通话状态，不动聊天记录。</p>
+  <button class="btn safe" id="copy">复制诊断结果</button>
+</div>
+</div>
+
+<script>
+const AK='dream_active_call_session_v1';
+const EK='dream_active_call_ended_v2';
+const SAFE_BACKUP='dream-safe-v1:backup:'+encodeURIComponent(AK);
+const SAFE_DEL='dream-safe-v1:deleted:'+encodeURIComponent(AK);
+const DB='dream-messenger-v3';
+let report={};
+
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const row=(k,v,cls)=>`<div class="row"><span>${esc(k)}</span><b class="${cls||''}">${esc(v)}</b></div>`;
+
+function readJSON(raw){
+  if(raw==null) return null;
+  try{
+    // 兼容 LZW 压缩前缀
+    if(String(raw).startsWith('~dream-lzw-v1~')) return '(已压缩，无法在此解析)';
+    return JSON.parse(raw);
+  }catch(_){ return '(解析失败)'; }
+}
+
+function fmtTime(t){ const n=Number(t); return n>0? new Date(n).toLocaleString('zh-CN') : '—'; }
+
+async function run(){
+  // 1 活跃会话
+  const rawA=localStorage.getItem(AK);
+  const a=readJSON(rawA);
+  report.active=a;
+  let h='';
+  if(!rawA){ h=row('活跃会话','不存在','ok'); }
+  else{
+    h=row('活跃会话','存在','bad');
+    if(a&&typeof a==='object'){
+      h+=row('通话对象',a.name||a.handle||'—');
+      h+=row('模式',a.mode==='video'?'视频':'语音');
+      h+=row('状态字段',a.status||'(无)',a.status==='active'?'bad':'warn');
+      h+=row('是否已接通',a.connected?'是':'否');
+      h+=row('更新时间',fmtTime(a.updatedAt));
+      const age=Date.now()-Number(a.updatedAt||0);
+      h+=row('距今',(age/3600000).toFixed(1)+' 小时',age>86400000?'ok':'bad');
+      h+=row('会话 id',a.id||'(无)',a.id?'':'warn');
+    }
+  }
+  document.getElementById('ls').innerHTML=h;
+
+  // 2 结束标记
+  const rawE=localStorage.getItem(EK);
+  const e=readJSON(rawE);
+  report.ended=e;
+  let h2 = rawE? row('结束标记','存在','ok') : row('结束标记','不存在','bad');
+  if(e&&typeof e==='object'){
+    h2+=row('结束时间',fmtTime(e.endedAt));
+    h2+=row('对应 id',e.id||'(无)');
+    h2+=row('对应 handle',e.handle||'(无)');
+    if(a&&typeof a==='object'){
+      const idMatch = e.id&&a.id&&e.id===a.id;
+      const timeMatch = e.handle===a.handle && Number(e.endedAt)>Number(a.updatedAt||a.startedAt||0);
+      h2+=row('能否匹配上活跃会话',(idMatch||timeMatch)?'能 → 会被清理':'不能 → 会被恢复',(idMatch||timeMatch)?'ok':'bad');
+    }
+  }
+  document.getElementById('ended').innerHTML=h2;
+
+  // 3 安全快照
+  const backup=localStorage.getItem(SAFE_BACKUP);
+  const del=localStorage.getItem(SAFE_DEL);
+  report.safeBackup=!!backup; report.safeDeleted=!!del;
+  let h3=row('安全快照',backup?'存在':'不存在',backup&&!del?'bad':'ok');
+  h3+=row('删除标记',del?'存在 ('+fmtTime(del)+')':'不存在',del?'ok':(backup?'bad':''));
+  if(backup&&!del) h3+=row('风险','快照会在启动时复活会话','bad');
+  document.getElementById('safe').innerHTML=h3;
+
+  // 4 IndexedDB
+  let h4='';
+  try{
+    const db=await new Promise((res,rej)=>{const rq=indexedDB.open(DB);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej();rq.onblocked=()=>rej();});
+    if(!db.objectStoreNames.contains('records')){ h4=row('records 表','不存在','warn'); }
+    else{
+      const rec=await new Promise(res=>{
+        const tx=db.transaction('records','readonly');
+        const g=tx.objectStore('records').get(AK);
+        g.onsuccess=()=>res(g.result||null); g.onerror=()=>res(null);
+      });
+      report.idb=rec? {deleted:rec.deleted, hasValue:!!rec.value, updatedAt:rec.updatedAt} : null;
+      if(!rec) h4=row('镜像记录','不存在','ok');
+      else{
+        h4=row('镜像记录','存在');
+        h4+=row('deleted 标记',rec.deleted?'true':'false',rec.deleted?'ok':'bad');
+        h4+=row('value 是否为空',rec.value?'非空':'空',rec.value?'bad':'ok');
+        h4+=row('previousValue',rec.previousValue?'有（可能被用于恢复）':'无',rec.previousValue?'warn':'ok');
+        h4+=row('更新时间',fmtTime(rec.updatedAt));
+      }
+    }
+    db.close();
+  }catch(err){ h4=row('读取失败',String(err&&err.message||err),'warn'); }
+  document.getElementById('idb').innerHTML=h4;
+
+  // 5 判定
+  let v='', cause=[];
+  if(!rawA){ v=row('结论','没有残留的活跃会话 —— 当前状态正常','ok'); }
+  else{
+    if(!rawE) cause.push('缺少结束标记：挂断时没写成功，或被清掉了');
+    else if(a&&e&&!((e.id&&a.id&&e.id===a.id)||(e.handle===a.handle&&Number(e.endedAt)>Number(a.updatedAt||0)))) cause.push('结束标记与活跃会话对不上（id 或时间不匹配）');
+    if(backup&&!del) cause.push('安全快照存在且无删除标记：启动时会被复活');
+    if(report.idb&&!report.idb.deleted&&report.idb.hasValue) cause.push('IndexedDB 镜像未标记删除且有值：可能被回写');
+    if(a&&a.status!=='active') cause.push('status 字段异常（'+a.status+'）');
+    if(!cause.length) cause.push('活跃会话存在，但未发现明显的复活来源 —— 可能是挂断时 endCall 没被调用（例如直接关了窗口）');
+    v=row('结论','发现残留的活跃会话','bad');
+    cause.forEach((c,i)=>{ v+=row('原因 '+(i+1),c,'bad'); });
+  }
+  document.getElementById('verdict').innerHTML=v;
+  report.cause=cause;
+}
+
+document.getElementById('fix').onclick=async()=>{
+  if(!confirm('清除全部通话状态？不会影响聊天记录。')) return;
+  try{
+    localStorage.removeItem(AK);
+    localStorage.removeItem(SAFE_BACKUP);
+    localStorage.setItem(SAFE_DEL,String(Date.now()));
+    localStorage.setItem(EK,JSON.stringify({id:'',endedAt:Date.now(),handle:''}));
+    localStorage.setItem('__dream-v3-cache-ts:'+encodeURIComponent(AK),String(Date.now()));
+    const db=await new Promise(res=>{const rq=indexedDB.open(DB);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>res(null);});
+    if(db&&db.objectStoreNames.contains('records')){
+      await new Promise(res=>{
+        const tx=db.transaction('records','readwrite');
+        tx.objectStore('records').put({key:AK,value:'',previousValue:'',deleted:true,deletedAt:Date.now(),updatedAt:Date.now(),schemaVersion:3});
+        tx.oncomplete=tx.onerror=tx.onabort=()=>res();
+      });
+      db.close();
+    }
+    alert('已清除。回到 Möbius 重新打开即可。');
+    run();
+  }catch(err){ alert('清除失败：'+(err&&err.message||err)); }
+};
+
+document.getElementById('copy').onclick=()=>{
+  const t=JSON.stringify(report,null,2);
+  navigator.clipboard?.writeText(t).then(()=>alert('已复制，发给开发者即可'),()=>prompt('手动复制：',t));
+};
+
+run();
+</script>
+</body></html>

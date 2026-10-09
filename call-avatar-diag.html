@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>通话头像诊断</title>
+<style>
+/* 与主程序一致：index.html 里有全局 * { box-sizing: border-box }。
+   不加这条的话本页测出的盒子会大 10px（content-box），数值会误导。 */
+*{box-sizing:border-box}
+body{margin:0;padding:20px 14px 46px;background:#eef1f2;
+ font:14px/1.65 -apple-system,BlinkMacSystemFont,'PingFang SC',system-ui,sans-serif;color:#23323a}
+h1{margin:0 0 4px;font-size:18px}
+.lede{margin:0 0 16px;color:#5b6f78;font-size:12.5px;line-height:1.7}
+.card{background:#fff;border:1px solid #dde4e7;border-radius:14px;padding:14px;margin-bottom:13px}
+.card h2{margin:0 0 9px;font-size:13.5px}
+.pick{display:block;padding:12px;border:1.5px dashed #a9bcc4;border-radius:11px;text-align:center;
+ color:#4a616c;font-size:13px;font-weight:600;cursor:pointer}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:12px}
+.spec{text-align:center;font-size:10.5px;color:#5b6f78;line-height:1.5}
+.spec b{display:block;margin-bottom:6px;font-size:11px;color:#23323a}
+
+/* ↓↓↓ 与 index.html 的 .call-avatar 完全一致（逐字复制） ↓↓↓ */
+.call-avatar{width:106px;height:106px;display:flex;align-items:center;justify-content:center;
+ overflow:hidden;color:#fff;border:5px solid rgba(255,255,255,.84);border-radius:50%;
+ font-size:28px;font-weight:800;background:linear-gradient(145deg,#8ad4ff,#4d7de4);
+ background-position:center;background-size:cover;box-shadow:0 18px 42px rgba(52,86,140,.25)}
+.mini .call-avatar{width:30px;height:30px;border-width:1.5px;border-color:rgba(255,255,255,.9);
+ border-radius:50%;font-size:6px;box-shadow:0 2px 7px rgba(45,91,115,.18)}
+.video .call-avatar{width:96px;height:96px;border-color:rgba(255,255,255,.28)}
+.rounded .call-avatar{border-radius:30%}
+/* 承托底：模拟通话界面深色背景，方便看出边缘 */
+.stage{padding:16px;border-radius:12px;background:linear-gradient(160deg,#33454f,#1d2a31);
+ display:inline-flex;align-items:center;justify-content:center}
+
+pre{margin:9px 0 0;padding:10px;background:#f5f8f9;border-radius:9px;
+ font:11px/1.6 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;color:#33474f}
+.warn{padding:10px 12px;border-left:3px solid #c2703f;background:#fdf5ef;border-radius:0 8px 8px 0;
+ color:#6c4526;font-size:12px;line-height:1.7;margin-top:10px}
+.ok{border-left-color:#4d8a5f;background:#f0f7f2;color:#2f5940}
+button.act{width:100%;margin-top:10px;padding:11px;border:0;border-radius:10px;background:#3d5a66;
+ color:#fff;font-size:13px;font-family:inherit;cursor:pointer}
+</style></head><body>
+
+<h1>通话头像诊断</h1>
+<p class="lede">用来查「视频/语音通话里对方头像填不满圆形」。<b>请在出问题的那台设备、用打开 Möbius 的同一个浏览器打开本页</b>，选一张你实际用作梦角头像的图片。本页不上传任何东西，只在本地测量。</p>
+
+<div class="card">
+  <h2>① 选一张头像图</h2>
+  <label class="pick">点这里选图片<input id="f" type="file" accept="image/*" hidden></label>
+  <div id="meta"></div>
+</div>
+
+<div class="card">
+  <h2>② 四种通话状态下的显示</h2>
+  <p style="margin:0;color:#5b6f78;font-size:11.5px">深色底是模拟通话背景。<b>正常应为：图片铺满整个圆，只在最外圈有一道半透明白边框。</b></p>
+  <div class="row">
+    <div class="spec"><b>语音·大窗</b><div class="stage"><div class="call-avatar" id="a1">MC</div></div></div>
+    <div class="spec"><b>视频模式</b><div class="stage video"><div class="call-avatar" id="a2">MC</div></div></div>
+    <div class="spec"><b>迷你窗</b><div class="stage mini"><div class="call-avatar" id="a3">MC</div></div></div>
+    <div class="spec"><b>圆角主题</b><div class="stage rounded"><div class="call-avatar" id="a4">MC</div></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>③ 测量结果</h2>
+  <button class="act" id="run">重新测量</button>
+  <div id="out"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const AVS=['a1','a2','a3','a4'];
+let currentSrc='';
+
+$('f').addEventListener('change',e=>{
+  const file=e.target.files&&e.target.files[0];
+  if(!file)return;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    currentSrc=fr.result;
+    const img=new Image();
+    img.onload=()=>{
+      $('meta').innerHTML='<pre>文件：'+esc(file.name)+'\n类型：'+esc(file.type||'(未知)')
+        +'\n大小：'+(file.size/1024).toFixed(1)+' KB'
+        +'\n原始尺寸：'+img.naturalWidth+' × '+img.naturalHeight
+        +'\n宽高比：'+(img.naturalWidth/img.naturalHeight).toFixed(3)+'</pre>';
+      apply();
+    };
+    img.onerror=()=>{ $('meta').innerHTML='<div class="warn">这张图浏览器解码失败 —— 可能就是问题所在（格式不被支持，例如某些 HEIC / 渐进式 WebP）。</div>'; };
+    img.src=fr.result;
+  };
+  fr.readAsDataURL(file);
+});
+
+// 与 index.html 里 setChatAvatarVisual 的赋值顺序完全一致
+function setAvatar(el,src){
+  el.textContent='';
+  el.style.background='#dedede';
+  el.style.backgroundImage='url("'+src+'")';
+  el.style.backgroundPosition='center';
+  el.style.backgroundSize='cover';
+  el.style.backgroundRepeat='no-repeat';
+}
+function apply(){ if(!currentSrc)return; AVS.forEach(id=>setAvatar($(id),currentSrc)); setTimeout(run,120); }
+
+function esc(s){return String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));}
+
+function run(){
+  const lines=[]; const problems=[];
+  AVS.forEach((id,i)=>{
+    const el=$(id), cs=getComputedStyle(el), r=el.getBoundingClientRect();
+    const name=['语音大窗','视频模式','迷你窗','圆角主题'][i];
+    lines.push('【'+name+'】');
+    lines.push('  盒子      '+r.width.toFixed(1)+' × '+r.height.toFixed(1));
+    lines.push('  bg-size   '+cs.backgroundSize);
+    lines.push('  bg-pos    '+cs.backgroundPosition);
+    lines.push('  bg-origin '+cs.backgroundOrigin);
+    lines.push('  bg-clip   '+cs.backgroundClip);
+    lines.push('  bg-repeat '+cs.backgroundRepeat);
+    lines.push('  radius    '+cs.borderRadius);
+    lines.push('  overflow  '+cs.overflow);
+    lines.push('  border    '+cs.borderWidth+' '+cs.borderColor);
+    lines.push('  box-sizing '+cs.boxSizing);
+    lines.push('  bg-image  '+(cs.backgroundImage==='none'?'none':cs.backgroundImage.slice(0,46)+'…'));
+    if(currentSrc){
+      if(cs.backgroundSize!=='cover') problems.push(name+'：background-size 不是 cover，是「'+cs.backgroundSize+'」');
+      if(cs.backgroundImage==='none') problems.push(name+'：背景图没加载出来');
+      if(Math.abs(r.width-r.height)>1) problems.push(name+'：盒子不是正方形（'+r.width.toFixed(1)+'×'+r.height.toFixed(1)+'），圆会被压成椭圆');
+      if(cs.overflow!=='hidden') problems.push(name+'：overflow 不是 hidden');
+      const rad=parseFloat(cs.borderRadius);
+      if(cs.borderRadius.indexOf('%')<0 && rad>0 && rad<r.width/2-2) problems.push(name+'：圆角只有 '+cs.borderRadius+'，不足半径');
+    }
+    lines.push('');
+  });
+  lines.push('【环境】');
+  lines.push('  UA        '+navigator.userAgent);
+  lines.push('  DPR       '+window.devicePixelRatio);
+  lines.push('  视口      '+window.innerWidth+' × '+window.innerHeight);
+  lines.push('  根字号    '+getComputedStyle(document.documentElement).fontSize);
+  ['cover','contain'].forEach(v=>{
+    lines.push('  支持 background-size:'+v+'  '+(CSS.supports?CSS.supports('background-size',v):'?'));
+  });
+  lines.push('  支持 background-origin:border-box  '+(CSS.supports?CSS.supports('background-origin','border-box'):'?'));
+
+  let html='<pre>'+esc(lines.join('\\n'))+'</pre>';
+  if(!currentSrc){
+    html+='<div class="warn">还没选图片 —— 上面是无图时的默认值。请先选一张你真实在用的头像。</div>';
+  } else if(problems.length){
+    html+='<div class="warn"><b>发现 '+problems.length+' 个异常：</b><br>'+problems.map(esc).join('<br>')+'</div>';
+  } else {
+    html+='<div class="warn ok"><b>四种状态测量值都正常</b>（cover / 正方形 / 圆形裁切 / 图片已加载）。<br>如果肉眼看仍不对，请把上面这段文字连同一张截图发给我 —— 说明问题不在这些属性上。</div>';
+  }
+  $('out').innerHTML=html;
+}
+$('run').addEventListener('click',run);
+run();
+</script>
+</body></html>

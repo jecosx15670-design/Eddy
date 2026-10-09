@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人设功能 · 版本自检</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:20px 15px 50px;background:#F6F4EC;color:#3D3A31;
+  font:14px/1.7 -apple-system,BlinkMacSystemFont,'PingFang SC',system-ui,sans-serif}
+.w{max-width:640px;margin:0 auto}
+h1{margin:0 0 6px;font-size:19px}
+.lead{margin:0 0 16px;color:#8A8270;font-size:12.5px;line-height:1.8}
+.lead b{color:#B08D3C}
+.pick{padding:15px 17px;border-radius:14px;background:#fff;border:2px solid #EFE7D4;margin-bottom:14px}
+.pick h2{margin:0 0 9px;font-size:14px}
+.pick p{margin:0 0 10px;color:#7C7463;font-size:12.5px}
+.pick input{width:100%;padding:11px 13px;border:1.5px solid #E2D9C2;border-radius:11px;
+  background:#FDFCF7;font:inherit;font-size:13px;color:#3D3A31}
+.pick input:focus{outline:0;border-color:#C9A64E}
+.btn{width:100%;margin-top:10px;padding:12px;border:0;border-radius:11px;background:#C9A64E;
+  color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.btn:active{transform:scale(.99);background:#B5923F}
+.btn.alt{background:#fff;color:#8F7434;border:1.5px solid #E2D9C2;margin-top:8px}
+.res{display:none;margin-top:16px}
+.res.on{display:block}
+.card{padding:15px 17px;border-radius:14px;background:#fff;border:2px solid #EFE7D4;margin-bottom:11px}
+.card h3{margin:0 0 10px;font-size:13.5px}
+.row{display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px solid #F4F0E4;font-size:12.5px}
+.row:last-child{border-bottom:0}
+.row .ic{flex:0 0 20px;font-weight:700;font-size:14px;line-height:1.4}
+.row .tx{flex:1;min-width:0}
+.row .tx b{display:block;color:#3D3A31;font-weight:600}
+.row .tx small{display:block;margin-top:2px;color:#9A9384;font-size:11px;line-height:1.6;word-break:break-all}
+.ok .ic{color:#5E8C55}
+.no .ic{color:#C4702B}
+.verdict{padding:17px;border-radius:14px;margin-bottom:12px;font-size:13.5px;line-height:1.8}
+.verdict.good{background:#EDF6E9;border:2px solid #B9D6AC;color:#3F6B37}
+.verdict.bad{background:#FDF0E4;border:2px solid #EBC59B;color:#9A5A22}
+.verdict b{display:block;margin-bottom:5px;font-size:15px}
+.fix{padding:15px 17px;border-radius:14px;background:#FFF9EC;border:2px solid #EDD9A8}
+.fix h3{margin:0 0 9px;font-size:13.5px;color:#8F6A1F}
+.fix ol{margin:0;padding-left:19px;color:#7C6A45;font-size:12.5px;line-height:1.95}
+.fix li{margin-bottom:6px}
+.fix code{padding:1px 5px;border-radius:4px;background:#F5E9CC;font:11.5px ui-monospace,monospace}
+.mini{margin-top:12px;color:#A39C88;font-size:11px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="w">
+  <h1>人设功能 · 版本自检</h1>
+  <p class="lead">用来确认<b>你手机上正在跑的那一份</b>有没有人设功能。四条改动（人设独立存档、进手机即弹、AI 只生成三项、移除全局用户设定）已在 <b>v53</b> 完成，如果你没看到，多半是 PWA 缓存还停在旧版。</p>
+
+  <div class="pick">
+    <h2>方式一 · 自动检测（推荐）</h2>
+    <p>如果这个页面和你的 Möbius 放在同一个目录，点下面直接测。</p>
+    <button class="btn" onclick="runFetch('./index.html')">检测同目录的 index.html</button>
+    <button class="btn alt" onclick="runLive()">检测当前已安装的 PWA（读缓存）</button>
+  </div>
+
+  <div class="pick">
+    <h2>方式二 · 手动粘贴</h2>
+    <p>把你手机上那份 index.html 用浏览器打开，全选复制，粘进来。文件很大，粘贴可能要等几秒。</p>
+    <input id="pasteBox" placeholder="粘贴 index.html 的内容">
+    <button class="btn" onclick="runText(document.getElementById('pasteBox').value)">检测粘贴内容</button>
+  </div>
+
+  <div class="res" id="res"></div>
+</div>
+
+<script>
+/* 每条检测都用「代码里必然存在的字符串」做锚点，而不是行号 */
+const CHECKS=[
+  ['人设独立存在梦角档案',      'p.persona=out',                       'savePersona 把人设写进 profile.persona，每个梦角一份'],
+  ['人设填写页存在',            'function openPersonaSetup(',           '四字段表单：身份 / 性格 / 习惯 / 往事'],
+  ['进手机即触发（非点钱夹）',  'phoneNeedsIntro(roleId)',              '写在 openRolePhone 开头，不再藏在钱夹面板里'],
+  ['未配 API 不显示人设页',     'function phoneAIReady(',               '检查 baseUrl / apiKey / model 三项齐全'],
+  ['AI 请求带上人设',           'persona:hasPersona?{',                 'payload 里有 persona 字段'],
+  ['AI 只生成三项',             '字段必须且仅为',                        'system 提示词限定 recentListening / memos / browser'],
+  ['行程钱夹不被 AI 覆盖',      'wallet:profile.data?.wallet',          'merge 时保留原值，不让 AI 写进去'],
+  ['星图有「人设」按钮',        'data-phone-persona',                   '配好 API 后星图底部可随时重填'],
+  ['跳过后不再反复弹',          'p.personaFilledAt=Date.now()',         '跳过也记时间戳'],
+];
+/* v59 / v60 新增项 */
+const CHECKS60=[
+  ['梦角会自己换聊天壁纸',      'function maybeRollPartnerWallpaper(',  'v59：每天首次进聊天室判一次，15% 概率从相册挑一张'],
+  ['壁纸让位规则',              'wallpaperUserDay',                     '用户当天手动设过，当天就不被自动换走'],
+  ['相册新界面',                'alb-wrap',                             'v60：暖杏色照片墙，两列错落'],
+  ['相册标出当前聊天背景',      'function albumLiveWallpaper(',         'v60：哪张正在当背景，图上直接标'],
+  ['顶栏改 HER / HIS PHONE',   'HER / HIS PHONE',                      'v63：明确这是对方的手机'],
+  ['TA 不让看（整机）',         'function phoneDenied(',                'v63：10% 概率整机拒绝，冷却 2 小时'],
+  ['拒绝用冷却而非纯随机',      'function phoneDenySlot(',              'v63：同窗口内结果稳定，退出重进绕不过'],
+  ['拒绝页界面',                'phone-deny-scr',                       'v63：一块暗着的小屏幕'],
+  ['通话头像铺满圆形',          "element.style.backgroundOrigin = 'border-box'", 'v64：修掉深色头像外圈的浅灰环'],
+  ['运势层级高于导航栏',        'position:absolute;inset:0;z-index:362',  'v65：原 302 低于导航栏 340，底部 44px 被压住'],
+  ['钱夹余额与 KOMO 统一',      'purse-wallet-init',                     'v66：钱夹原本不初始化钱包，首次显示 ¥0.00'],
+  ['红包扣款守恒',              'const paid=Math.min(wallet.balanceCents,amount)', 'v66：原 Math.max(0,…) 静默扣到零，账目差 ¥1230'],
+  ['发红包受余额约束',          'red-envelope-plan',                     'v66：金额封顶在梦角余额的 60%'],
+  ['星轨保留彩蛋契约',          'soft-star-vinyl',                       'v67：长按封面 1250ms 的星轨彩蛋未被破坏'],
+  ['今晚一起听过',              'function renderListenTrail(',           'v67：真实播放轨迹，无记录时显示空态'],
+  ['唱片一圈即停',              'listenDiscSpin 4s cubic-bezier',        'v69：开始播放时出现一次动画'],
+  ['今晚有时间边界',            'function listenNightKey(',              'v68：凌晨 5 点前算前一夜，跨夜自动清空'],
+  ['冠军卡改极简数字',          'mus-bignum',                           'v61：巨大数字当背景，去掉紫色渐变实卡'],
+  ['背景数字不被读屏重复念',    'aria-hidden="true">\'+champPlays',      'v61：装饰数字与真实数字重复，须 aria-hidden'],
+  ['快照过期标记',              'chat-history:stale-rooms',              'v70：localStorage 写失败时标记该聊天室，快照不再被当权威'],
+  ['写失败即打标记',            'markChatSnapshotStale(key);',           'v70：saveChatHistoryForHandle 写失败分支'],
+  ['写成功即清标记',            'clearChatSnapshotStaleMark(key); return true;', 'v70：恢复正常后解除标记'],
+  ['反删加了例外',              'if(currentLines.length&&!snapshotStale)','v70：过期快照不得反向清理逐条库（丢消息根因）'],
+  ['逐条库反补快照',            "source:'stale-snapshot-repair'",        'v70：用 IndexedDB 把快照缺失的尾部消息补回来'],
+  ['单体历史安全退役',          'function retireLegacyMonolithChatHistory(', 'v70：核对分片完整后才删，省出约一半配额'],
+  ['空间告急时清冗余',          "typeof retireLegacyMonolithChatHistory === 'function'", 'v70：配额自救时优先清掉纯冗余副本'],
+  ['深度恢复按分片统计',        'const currentCount=(()=>',              'v70：否则单体退役后会误判全丢 → reload 死循环'],
+  ['提示文案说人话',            '本地空间快满了，消息已存进数据库',        'v70：旧文案谎称可去存储中心恢复'],
+  ['挂件让位写法说明',          '不小于探出高度的 margin-top',            'v71：挂件探出会占到上一条消息头上，需用 margin 让位'],
+  ['主题CSS框挂件也豁免',       ':not([data-chat-bubble="custom"]):not([data-chat-theme="custom"])', 'v72：挂件也可能写在主题 CSS 框，v71 漏判导致 0/26 全被切'],
+  ['挂件遮挡写法说明',          '给挂件写 z-index:5',                     'v72：挂件与气泡重叠的部分会被气泡盖住，与裁剪无关'],
+  ['联系人置顶会保存',          'function setChatRowPinned(',             'v73：原本只改 DOM class，重开 CHAT 就丢'],
+  ['置顶字段已归一化',          'normalized.pinnedAt',                    'v73：用时间戳，多个置顶项顺序稳定'],
+  ['重建列表恢复置顶',          "toggle('is-pinned', Number(rowRole?.pinnedAt)", 'v73：与「暂时离开」同样在重建时还原'],
+  ['置顶顺序统一入口',          'function applyChatListPinnedOrder(',     'v73：操作后与重建后顺序必须一致'],
+  ['进度条左右留白',            'margin-left: 15px; margin-right: 15px;', 'v74：原本满宽顶到屏幕边，与「今晚一起听过」对齐'],
+  /* 锚点不要带 KEEP 列表的结尾 `)/i` —— v94 往列表里加了 |wave，结尾就失配了。
+     只锚定词本身并带 | 前缀，确保命中的是正则列表而非 CSS 类名。 */
+  ['星轨彩蛋不被降级停掉',      '|soft-star-vinyl',                       'v74：极简模式曾把长按彩蛋的动画一起停了'],
+  ['特殊卡片改拼贴风',          '--cc-ac:#3E63A8',                        'v75：五类卡各一张彩纸，蓝/绿/紫/红/青'],
+  ['卡片叠纸效果',              'has(> .chat-check-bubble)::before',      'v75：底下垫两层歪斜底纸'],
+  ['纸张噪点',                  'feTurbulence',                           'v75：让纸看起来像真纸不是纯色块'],
+  ['红包印章已去除',            '.chat-red-envelope-seal{ display:none',  'v75：用户要求去掉「福」字'],
+  ['卡片入场动效',              '@keyframes ccPaperDrop',                 'v75：纸片落下并回弹'],
+  ['恢复历史不播动画',          'if (restoringChatHistory || chatHistorySwitching) return;', 'v75：只有新消息才有落纸动画'],
+  ['群聊卡片也改拼贴',          '#chatApp .group-v2-special-bubble{',      'v76：群红包/邀请/查岗/决策四类同步 E3'],
+  ['群卡类型标记',              'function tagGroupSpecialCardKind',        'v76：群卡无类型字段，按标题打类才能上色'],
+  ['群卡底纸按类型变色',        '--gcc-u:#F7D9D0',                        'v76：伪元素在父级，继承不到卡片变量'],
+  ['胶带改真实位图',            '--cc-tapeimg:url(data:image/png',        'v77：和纸纤维噪点+撕裂边，不再是CSS渐变'],
+  ['纸纹改真实位图',            '--cc-tex:url(data:image/png',            'v77：小碎花/波点/斜织/星点，无横线格子'],
+  ['图标改多色实物',            '.chat-decision-card-head::before',       'v77：3倍图防糊，礼物/投票箱/硬币等'],
+  ['报备卡底纸修正',            'has(> .chat-check-reply-bubble)::after', 'v77：原复用查岗蓝色，应为绿色'],
+  ['决策弹窗压成单张纸',        'fs-quickrow',                            'v78：原四段堆叠 661px，含编号徽章'],
+  ['决策记录收进折叠',          'fs-records',                             'v78：不再占主流程'],
+  ['统计纸上并排数字',          '.fs-tally',                              'v79：三个总数不再用白卡'],
+  ['弹窗改墨线风格',            'box-shadow:6px 6px 0 var(--fs-ac)!important', 'v80：墨黑细边框+主色硬投影'],
+  ['占位符对比度达标',          'color:#6E6A62!important; opacity:1',     'v80：原 4.13~4.26 未达 AA，现 5.34'],
+  ['决策是非题在上',            '<span class="fs-lb">是非题</span>',      'v80：用户要求是非在上、自定义在下'],
+  ['通话状态不被快照复活',      'EPHEMERAL_KEYS=new Set',                 'v85：挂断后关页面再进仍显示通话中的根因'],
+  ['删除时连快照一起清',        "dreamStorageSafetyKey('backup', name)",  'v85：光留删除标记会被后续写入清掉'],
+  ['通话恢复窗口收到5分钟',     '> 300000) { clearPersistedCallSession',  'v85：原 24 小时，陈旧通话会莫名弹出'],
+  ['KOMO 卡片拼贴样式',         'chat-komo-flow-bubble{',                 'v85：KOMO 卡改便利店实物拼贴，v75 拼贴当时漏了 KOMO'],
+  ['KOMO 卡不再降级纯文字',     'komoSnapshotHasCard(role.id',            'v85：人不在聊天室时原本放弃画卡，只发一句白话'],
+  ['KOMO 流水卡已实装',         'function buildKomoFlowCard(',            'v85：下单/充值/集章/使用/退款/里程碑原本聊天室零痕迹'],
+  ['后台落地不丢卡',            'function isChatThreadDomForHandle(',     'v109：判据从「聊天室在前台」改为「DOM 归属房间」——否则返回列表后发的代付卡只写快照、重进看不见'],
+  ['进房间补渲染',              'isChatThreadDomBehindSnapshot(nextHandle)','v109：快照比 DOM 新就重建线程，立刻重进即可看到卡'],
+  ['代付卡登记身份',            "['komo-pay-request', line.querySelector(", 'v109：与转账卡同样的老病根——不登记身份则去重/删除记忆/DOM 兜底三套机制全失效'],
+  ['代付结果卡不去重吃掉请求卡', "['komo-pay-result', line.querySelector(",  'v109：两种卡共用 task id，必须按气泡类型分开登记'],
+  ['KOMO 查重认 DOM 归属',      'isChatThreadDomForHandle(roleId)',       'v109：房间在后台时卡已在 DOM 里，查前台会漏判导致重复插卡'],
+  ['代买「稍后」保留入口',      'keepAction:action===',                   'v85：原本点稍后按钮全消失，这条请求就死了'],
+  ['收礼回应改成卡片',          "sendKomoFlowCard('gift-recv'",           'v85：原为纯文字白气泡，和送礼卡断开'],
+  /* 锚点不要跨行：原本写的 \n 在源码里是转义反斜杠+n，查的是字面量，永不命中。 */
+  ['KOMO卡不被我方渐变刷掉',   'background-color:var(--kk-paper)!important', 'v85：发出的卡整张变蓝紫渐变'],
+  ['KOMO卡已排除通用气泡规则', ':not(.group-v2-special-bubble):not([class*="chat-komo-"])', 'v85：通用 !important 规则在后面盖掉了 padding'],
+  ['商品图标已补进代付明细',   "<i>${product?.icon||'🛍️'}</i>",        'v85：明细行原本只有名字和价格'],
+  ['发出方向装饰翻到反侧',     'right:auto; left:-27px; transform:rotate(-9deg)', 'v85：墨戳压住右侧头像 37%'],
+  /* ⚠ v94 修：这条锚点自 v85 起就写坏了 —— 片段里含单引号却用单引号包裹，
+     整个 <script> 抛 SyntaxError，自检页九个版本以来一直是「点了没反应」。
+     含引号的锚点必须换一种引号包裹，改完要跑一次 acorn 才算数。 */
+  ["聊天列表KOMO预览已修",   "chat-komo-flow-head > span')?.textContent,20)", 'v85：列表预览原本把整张卡文字拼成一长串'],
+  ['墨戳已换成猫爪',         '--kk-seal) center/contain no-repeat',    'v84：右下角圆戳改猫爪图案'],
+  ['主动代付四档已拆分',     'const KOMO_ACTIVE_ALL_PERCENT=25',        'v85：A 路径独立分档，全部代付25%/不触发25%'],
+  ['A路径复用同一个roll',    'const activeRoll=hash(`${state.cartRoundId}', 'v85：两次%100凑不出整数概率，改单次判定'],
+  ['老存档无activeRoll不崩', 'Number.isFinite(Number(task.activeRoll))', 'v85：旧任务退回 manual 档位'],
+  ['人设页不再依赖AI',       'if(!p.personaFilledAt)return true;',      'v86：原来没配 AI 就永远不弹人设页'],
+  ['星图人设按钮常驻',       '<button type="button" data-phone-persona>人设</button>', 'v86：原来 AI 未配时整个不渲染'],
+  ['未配AI时有提示',         'persona-noai',                           'v86：告知填了会先存住'],
+  ['本地词库已实装',         'const PHONE_BANK_BROWSE=',               'v87：677 条词库，不配 AI 也能因人而异'],
+  ['人设标签抽取',           'function phonePersonaTags(',             'v87：人设四字段做关键词匹配出标签'],
+  ['职业配额抽取',           'jobTags=tags.filter(t=>t.indexOf(',       'v87：原本合并池平均抽，本职只命中 1.1/6 条'],
+  ['填完人设立刻重算',       "if(p.generatedBy!=='ai')",              'v87：否则填了看不到任何变化'],
+  ['行程空日兜底',           'function personaTripFallback(',          'v87：只补空日，有真实消费的以账本为准'],
+  ['桌面碰撞检测已重写',     'function desktopRectsOverlap(',          'v88：原实现首屏占 23.1% CPU，写后即读强制重排'],
+  ['字号100%时跳过遍历',     'Math.abs(Number(scale) - 1) < 0.001',    'v88：默认字号下 getComputedStyle 全是白烧'],
+  ['KOMO报时改异步',         'requestAnimationFrame(()=>window.setTimeout(triggerKomoHourlySign', 'v88：同步重排 1024 个元素'],
+  ['性能兜底层已加',         'v88 · 性能兜底层（实测驱动）',           'v88：transition 3936 个元素原本没被任何模式管'],
+  ['ORDER App 已实装',       'const ORDER_STATE_KEY=',                 'v90：点单 App，配方+工序+盲盒+配送+梦角'],
+  ['ORDER 桌面图标',         'data-layout-id="app-order"',            'v90：桌面第九个系统 App'],
+  ['ORDER 共用KOMO账本',     "type:'order-drink'",                    'v90：扣款进同一本账，钱夹行程可见'],
+  ['手作评级三作用',         'function orderRecordCraft(',             'v90：心情加成/梦角反应/解锁基底'],
+  ['梦角同行点单',           'function orderInviteRole(',              'v90：主动叫上 TA + TA 提要求'],
+  ['真实杯体渲染',           'function orderRenderCup(',               'v92：真实照片合成，非 SVG 色块'],
+  ['喜茶黑界面',             '.order-bar{display:flex',                'v92：纯白底+黑字+底部常驻结算条'],
+  ['8种真实小料素材',        'const ORDER_TOP_IMG=',                   'v92：珍珠椰果芋泥奶盖仙草燕麦红豆布丁'],
+  /* ⚠ v97 换水彩杯后，几何改为「逐行」存储，不再每 4 行插值，
+     原锚点 Math.floor((y-2)/4)*4+2 已被删除，这里改查新的取键逻辑。 */
+  /* v98：orderInnerAt 增加 geo 形参以支持多杯型，取键从写死 ORDER_CUP_GEO 改为局部 G */
+  ['杯型逐行查表',           'G[k-d]||G[k+d]',                         'v98：逐行采样 + 可传入指定杯型几何'],
+  ['回信到期时间已持久化',   'replyDueAt: Number(value.replyDueAt)',   'v93：原定时器只在内存，刷新即丢失'],
+  ['启动重建回信定时器',     'function restoreMailReplies(',           'v93：挂进 runLocalSchedulerCatchUp'],
+  ['回信取不到文案有提示',   '没有挂载「内容」字卡分组',                'v93：原为静默 return'],
+  ['循环动画按声明还原原速', "animation-duration:' + dur + '!important", 'v94：正在输入被全局提速，1s 压到 .22s'],
+  ['输入气泡原速静态兜底',   'chat-typing span{ animation-duration:1s!important', 'v94：CSSOM 扫描失败时也保住 1s'],
+  ['还原只在动画未被停用时', 'aliveBalanced = kept || !isCostly',      'v94：已停用的装饰动画不该被还原'],
+  ['ORDER 冰箱已实装',       'function renderOrderFridge(',            'v95：送达不再蒸发，进冰箱可喝/送/倒'],
+  ['冰箱 24 格上限',         'const ORDER_FRIDGE_MAX=',                'v95：满格不丢单，留在订单里等补收'],
+  ['保鲜期判定',             'function orderFreshness(',               'v95：热饮4h/其余12h，过期只是变难喝'],
+  ['配方图鉴已实装',         'function renderOrderCodex(',             'v95：11个隐藏配方原本撞中了也没处看'],
+  ['喝掉走真实结算',         'function orderDrink(',                   'v95：从冰箱移除并累计 drunk'],
+  ['补偿走独立退款流水',     'function orderRefund(',                  'v95：不能用 orderCharge 传负数'],
+  ['骑手小剧场分场景',       'ORDER_RIDER_SCENE',                      'v95：按夜间/雨天/常规挑台词池'],
+  ['ORDER 隐藏彩蛋',         'const ORDER_EGG=',                       'v95：翻车补偿/白开水/夜班/第5杯/集齐'],
+  /* v97：双层堆叠被「悬浮撒点」取代 —— 两种小料各按自己的密度曲线撒，
+     天然就分得开，不需要再堆两层。 */
+  ['两种小料各自撒点',       'sink.slice(0,2).forEach((tp,ti)',        'v97：两种小料按不同 bias 分层悬浮'],
+  /* v97：颗粒改为圆形裁切贴图，半径统一，不存在纵向压扁问题 */
+  ['颗粒圆形裁切',           'g.arc(cx,y,rad,0,Math.PI*2);g.clip()',   'v97：等比贴图，不会压成椭圆'],
+  ['真实冰块素材',           'ORDER_TOP_IMG.ice',                      'v96：原来是 canvas 手画六边形'],
+  ['冰块用 lighten 融进液体', "globalCompositeOperation='lighten'",     'v96：直接贴白底照片会变贴纸感'],
+  ['咖啡油脂素材',           'ORDER_TOP_IMG.crema',                    'v96：热咖啡/可可盖一层真实 crema'],
+  ['水彩杯已换用',           '--op-paper:#FBF8F1',                     'v97：ORDER 界面改手账风，米白纸底'],
+  ['杯型几何已重新采样',     'pad==null?2:pad',                        'v97：水彩杯逐行几何，不再每4行插值'],
+  ['液面范围由几何推导',     'const ORDER_LIQ_TOP',                    'v97：不再写死 30/498（照片杯坐标）'],
+  ['悬浮小料密度曲线',       'SINK_PROFILE=',                          'v97：颗粒撒进液体中间，照片杯做不到'],
+  ['奶盖夹在杯口与液面间',   'capBot-46',                              'v97：原写死 LIQ_TOP-62 会跑出杯口'],
+  ['咖啡品类已补足',         '"americano"',                            'v98：原本只有浓缩1种，补美式/拿铁/卡布/澳白/冷萃/手冲'],
+  ['多杯型素材表',           'const ORDER_VESSEL=',                    'v98：纸杯/剖面窗/玻璃杯/外卖袋'],
+  ['几何按杯型取',           'orderVesselGeo(recipe)',                 'v98：每种杯型一份逐行几何，共用会画到杯外'],
+  ['纸杯正面不画内容',       'const OPAQUE=orderVesselOpaque',         'v98：纸杯不透明，内容物物理上看不见'],
+  ['剖面窗可切换',           'orderCutaway',                           'v98：点杯子在正面/剖面之间切'],
+  ['外卖袋已接入调用',       'function orderBagImg(',                  'v99：v98 只有素材没有调用路径，bag 永远选不中'],
+  ['配送途中显示袋子',       'function orderInTransit(',               'v99：step 2~3 骑手拎的是袋不是杯'],
+  ['多杯打包行',             'order-packrow',                          'v99：冰箱 ≥2 杯时显示一袋'],
+  ['卡片来源可区分',         'config.srcApp',                          'v100：ORDER/KOMO 共用 kind，靠 data-src 分开'],
+  ['ORDER 卡专属星点',       '--kk-star',                              'v100：只挂 [data-src=order]，便利店不变'],
+  ['文字垫底防吃字',         'box-decoration-break:clone',             'v100：v83 背景太花吃字的教训'],
+  ['杯型可手动选',           'ORDER_VESSEL_PICK',                      'v101：v98 只有自动判定，没有选择入口'],
+  ['叫上TA弹梦角列表',       '叫 TA 一起喝',                            'v101：原来只认当前聊天室，从桌面进必失败'],
+  ['发卡函数已挂window',     'window.sendKomoSelfFlowCard=',            'v101：跨 IIFE 拿不到，卡片一张都发不出'],
+  ['ORDER 过程不进聊天',     'ORDER 进度只在 ORDER 页面显示，不写入聊天。', 'v111z21：下单和进度不写聊天'],
+  ['B 配送进度原地更新',     'function orderUpdateTraceCard(',          'v101：cardId 去重 + 改 DOM，不刷屏'],
+  ['ORDER 送达通知',         "orderNotify('ORDER 已送达'",                 'v111z21：送达用横幅或系统通知'],
+  ['ORDER 无聊天小票',       'v111z21OrderNoChatFlow',                  'v111z21：流程卡片全部退出聊天'],
+  ['E 邀请卡',               'order-invite:',                          'v101'],
+  ['挂件不被裁',             'not(:has(.chat-komo-flow-bubble))',      'v102：content-visibility 隐含 contain:paint 会切挂件'],
+  ['窄屏卡片收窄',           'max-width:calc(76% - 16px)',             'v102：320px 下猫爪会顶出屏幕本身'],
+  ['拼一拼固定分组',         "id: 'glyph', name: '拼一拼'",           'v103：字典字卡，单字/字母/数字'],
+                          ['预设字库已清空',         'var GLYPH_DEFAULT_CARDS = [];',          'v110：原 202 张预设单字全删，分组留空，用户自挂'],
+                          ['识别表就位',             'var GLYPH_POS = {',                       'v111：预设词表换成识别表，只做查表归类，不产生字卡'],
+                          ['词表由字卡现算',         'function buildGlyphLexFromCards(',        'v111：字卡是唯一来源；删字卡词表跟着瘦'],
+                          ['未归类不进词表',         'unclassified.push(w)',                    'v111：认不出的字不猜，等用户点一下'],
+                          ['固定 1:3',               'GLYPH_REPLY_RATIO = 0.25',                'v111：四分之一才尝试拼句'],
+                          ['3～6 字长度闸',          'GLYPH_MAX_CHARS = 6',                     'v111：按显示字数算，挑不中就回落普通字卡'],
+                          ['拼句气泡=拍一拍外衣',     'border-radius: 999px !important',        'v111j7：原来方形书签卡换成拍一拍那件虚线胶囊（旧「拼」签头已撤）'],
+                          ['拼句气泡跟主题色',       "'--glyph-chip-bg'",                     'v111j7：底/边/字三色由主题强调色派生，换主题跟着变'],
+                          ['节奏输入框不被抢',       'if (!input || input === document.activeElement) return;', 'v111j8：抖动落盘会把正在填的那格按设置重写，填 3 被夹回 20 —— 现在编辑中的框绝不覆盖'],
+                          ['节奏收笔才排秩序',       'if (edited === \'replyMax\') replyMin = clamp(replyMax',  'v111j8：下限 ≤ 上限的修正只在失焦/回车时做，打字途中不碰另一个框'],
+                          ['清空中不落盘',           "if (raw === '') return null",            'v111j8：清空准备重填时不会被默认值顶回来'],
+                          ['离开页面前补写',         'companionRhythmFlush',                   'v111j8：pagehide / 切后台把没落盘的编辑补上，打完马上刷新也不丢'],
+                          ['回复节奏边打边存',       'replyRhythmTimers',                      'v111j10：原来只有点「保存全局回复节奏」才落盘，手机上改完刷新=白改'],
+                          ['回复节奏离开前补写',     'flushReplyRhythm',                       'v111j10：切后台 / 关页面把没落盘的那一次补上'],
+                          ['月亮输入边打边存',       'moonLenTimers',                          'v111j10：周期长度 / 经期天数原本只听 change，填完切走不算数'],
+                          ['主动来电两格会回填',     'proactiveContactMinMinutesInput: settings.proactiveContactMinMinutes', 'v111j11：这两格漏在回填表外 —— 打开面板/收笔重渲染后变空框，看着像「填了没存」'],
+                          ['主动来电最慢也会回填',   'proactiveContactMaxMinutesInput: settings.proactiveContactMaxMinutes', 'v111j11：同上，两格一起补'],
+                          ['旧壳会自己发现并换新',   'syncOfflineShellOnBoot',                 'v111j12：SW 的「有新版本」消息发给的是正在卸载的旧页面，常年不关的 App 收不到 → 启动时自己问缓存版本'],
+                          ['换壳前先看有没有草稿',   'const shellDraftPending = () =>',        'v111j12：有没发出去的字时不换壳；可编辑文本只在「有焦点」时才算草稿（首页挂件天天有字，旧判据把换壳永远挡住）'],
+                          ['拼句排队进来也带外衣',   '} else if (isGlyphText(item.text || \'\')) {', 'v111j12：不在房间时收到的拼句，进房间补出来时只写纯文字、丢了虚线胶囊'],
+                          ['没字卡也不许变哑巴',     'const FALLBACK_REPLY_TEXTS',             'v111j12：v110 删预设字卡时兜底句集合也空了 → 空库时回复结构性标成「已读不回」、主动消息静默失败'],
+                          ['壳缓存位不许被顶掉',     '我手上这份壳已经比线上旧',                'v111j13：以前任何页面的导航响应都写进 ./index.html 的缓存位 —— 打开过自检页/诊断页后，App 可能被换成那个页面'],
+                          ['旧壳比线上旧也能发现',   'status.stale === true',                  'v111j13：文件换了但版本号没改时，页面拿「上次发给我的那份壳长度」跟线上比，仍然能自己换新'],
+                          ['词表扩到 700 条以上',     'GLYPH_DEG_PREFIX',                       'v111k：识别从「整卡查表」升级成六层；词表 154 → 750+，并把「太/最」这种漏配的补进程度词'],
+                          ['词素规则六族',           'GLYPH_FOOD_SUF',                         'v111k：「X了」/程度+形/时间词素/方位/称呼/食物饮品词素/叠词 —— 词表列不全的长尾靠规则兜'],
+                          ['最长匹配切分（短语块）', '切分·动作块',                            'v111k：整卡能拆成几个已知词时，当一个「动作块/形容块」进句子（陪你 / 早点睡），不动用户的卡'],
+                          ['未归类会给建议',         'adoptGlyphSuggestion',                   'v111k：有依据但没把握的卡给「建议」，点一下采纳；建议不进词表，不污染句子'],
+                          ['一键全部采纳',           '全部按建议归类',                          'v111k：顶部一个按钮把当页所有建议一次收完'],
+                          ['长卡想拆才拆',           'splitGlyphCard',                         'v111k：动作块卡右边一个「拆开」，点了才把长卡换成它的零件'],
+                          ['手点一次教会一类',       'glyph-pos-learned:v1',                   'v111k：手改/采纳时顺手记住卡里的词素，下次含同一个词的卡自动归类'],
+                          ['AI 兜底不点不联网',      'runGlyphAiClassify',                     'v111k：未归类的可一键发给你自己配的模型认一遍；没配就给人话提示'],
+                          ['招呼整句能当一句话',     '"phrase","tone"',                        'v111k3：早安/辛苦了/早点睡 这类整句卡有自己的骨架（phrase 帧）'],
+                          ['词性标签不比字卡大',     '.card-manager-item .glyph-pos-badge',     'v111k2：标签被 `.card-manager-item button{width:23px;height:23px;font-size:12px}` 顶成 12px 方按钮，比字卡的 8px 还大 —— 选择器要带父级才压得住'],
+                          ['归类标签',               'glyph-pos-badge',                         'v111：字卡管理里每张卡标出词性，点一下改'],
+                          ['空词表直接回退',         "!L.frames.length) return ''",          'v110：没有骨架就返回空串，回落普通字卡，不抛异常'],
+                          ['无字卡不报错',           "if (avail.size < 6) return '';",         'v111：字池不足 6 张就直接回落，不抛异常'],
+  ['字库不混进普通池',       "kind: 'glyph'",                          'v103：kind 不是 content，单字不会当整句发'],
+  ['造句引擎',               'function composeGlyphSentence(',         'v103：按骨架取词 + 每字校验字库'],
+  ['程度词独立成一类（不再分副词/范围词）',     "'deg','tone','time','place'",              'v111k3：很/真/也/都/只 全部归「程度词」，不再按修饰对象拆表'],
+  ['动宾搭配约束',           "'drink'",                                'v103：实测出过「喝花」「喝点心」'],
+  ['磁贴渲染',               'function renderGlyphTiles(',             'v103：逐字小方块，轻微错位'],
+  ['老档案补种字库',         "definition.id === 'glyph' && !existing.cards.length", 'v103：有梦角的档案曾被迁移清成 0'],
+  ['连词成句开关',           'glyphCardsEnabled',                      'v103：全局设置，默认关'],
+  ['开关滑块用 i 不是 span', '<input id="globalGlyphCardsToggle" type="checkbox"><i>', 'v104：写成 span 时 CSS 不匹配 → 滑块 0x0，实测整行右侧空白，功能点不到'],
+  ['设置项叫连词成句',       '<strong>连词成句</strong>',              'v104：用户要求改名，不再叫「字典字卡」'],
+  ['存量梦角补挂 glyph',     'function backfillGlyphCardMount(',       'v104：v103 前配置过挂载的梦角白名单里没有 glyph，开了也拼不出一个字'],
+  ['补挂只跑一次',           'glyph-mount-backfill',                   'v104：marker 保证幂等，用户手动取消挂载后不会被强塞回来'],
+  ['界面不会被滚出抽屉',     '#appScreen > .widget-drawer[data-idle="1"]', 'v107：关着的抽屉仍占 520px 可滚动溢出，一聚焦输入框整个界面上移、抽屉整块露出，overflow:hidden 又让用户滑不回去'],
+  ['容器不再可滚',           '#appScreen { overflow: clip; }',         'v107：overflow:clip 让容器连程序化滚动都无权（旧浏览器自动退回 hidden）'],
+  ['底栏隐藏不再依赖:has',   '#appScreen[data-active-app="chat"] > .bottom-nav', 'v107：旧 WebView 会整条丢弃 :has() 规则，底栏于是压在聊天输入框上'],
+  ['CHAT里抽屉也有兜底',     '#appScreen[data-active-app="chat"] > .widget-drawer', 'v107：同上，属性版规则与 :has() 版覆盖面一致'],
+  ['打字时底栏让位',         'root.dataset.editing = v',               'v107：部分安卓浏览器 innerHeight 跟着键盘一起缩，keyboardInset 恒为 0，data-keyboard-open 永远不亮'],
+  ['焦点进输入框先收抽屉',   "target.closest('#widgetDrawer')",        'v107：抽屉内部的 INS 组件本身可编辑，编辑它们时不能收抽屉'],
+  ['卡片不再推开头像',       '.chat-message-line.incoming:has(> .chat-message-content > .chat-komo-flow-bubble) > .chat-message-content', 'v108：原先「让位」的 26px 加在整行上，头像跟着内缩（收到 12→38 / 发出 343→317），同一屏普通消息却贴边'],
+  ['让位改记在卡片外侧',     '.chat-message-line.outgoing:has(> .chat-message-content > .chat-komo-flow-bubble) > .chat-message-content', 'v108：改成卡片自己的外边距，头像回到贴边位置，卡片坐标与装饰间距一个像素没动'],
+  ['调度参数实时保存',       "schedulerSaveTimers",                    'v105：原本只听 change，手机上改完不失焦直接刷新就丢了'],
+  ['调度参数切后台落盘',     'flushSchedulerPending',                  'v105：visibilitychange + pagehide 兜底'],
+  ['调度参数 0 不当假值',    'function clampSchedulerValue(',          'v105：原写 Number(x)||默认值，填 0 会跳回默认值'],
+  ['保存前强制夹紧',         'normalizeSchedulerSettings(globalAppSettings)', 'v105：load 命中缓存会跳过 clamp，越界值原样写盘'],
+];
+const NEG=[
+  ['网页保存残留已清除',     '__CF$cv$params',                         'v106：网页保存时被 CDN 注入的挑战脚本 —— 自托管下必然 404，还会往 body 里塞一个隐藏 iframe'],
+  ['装饰价签已移除',          'background:var(--kk-tag) center/contain', 'v85：用户要求去掉价格牌标签'],
+  ['KOMO 代买纯文字降级已移除', '路过 KOMO 的话，可以帮我带一个',        'v85：这条降级文案应当完全消失'],
+  ['全局「用户设定」已移除',    'phoneAICustomPrompt',                  '这个 id 应当完全消失'],
+  ['假壁纸文案已删除',          '作为锁屏和桌面壁纸。</p>',              'v60：锁屏/桌面早已不存在，这句话是假的'],
+  ['锁屏桌面死代码已清除',      'function dailyWallpaper(',             'v60：调用数为 0 的死函数'],
+  ['旧相册九宫格已替换',        'phone-album-grid',                     'v60：改为 .alb-grid'],
+  ['冠军卡旧渐变已移除',        'linear-gradient(135deg,#6A5C93,#8E76B4)','v61：白字打在亮端对比度仅 3.89，不达 AA'],
+  ['设备归属文案已修正',        '上传的图片只存在这台设备上',            'v62：这是对方的手机，「这台设备」指向错误'],
+  ['旧顶栏副标题已替换',        'PRIVATE DEVICE ARCHIVE',               'v63：改为 HER / HIS PHONE'],
+  ['通话头像旧边框已移除',      'border: 5px solid rgba(255,255,255,.84)','v64：border 占掉 5px 头像，改用 box-shadow'],
+  ['运势旧层级已修正',          'inset:0;z-index:302',                   'v65：302 低于 .bottom-nav 的 340'],
+  ['红包旧扣款逻辑已移除',      'amount);wallet.sentToMeCents=(wallet.sentToMeCents||0)+amount', 'v66：旧代码会把余额静默扣到 0 且不记账'],
+  ['星轨公转已撤销',            '@keyframes loOrbit',                    'v69：用户要求头像回归原版不旋转'],
+  ['唱片无限旋转已移除',        'listenDiscSpin 4s linear infinite',     'v69：改为播放时转一圈即停'],
+  /* ⚠ 锚点纪律：这两项必须用活代码独有的形式，不能用会出现在新注释里的字面文案，
+     否则命中注释误判失败（v60 / v66 已各栽一次）。 */
+  ['单体历史停止写入',          'writeDreamJSON(CHAT_HISTORY_STORAGE_KEY, state);', 'v70：这份冗余副本实测独占约一半 localStorage'],
+  ['旧误导提示已移除',          "showChatToast('消息已显示，但本地缓存写入失败", 'v70：数据没丢也没法从存储中心恢复，文案是错的'],
+  ['无条件裁挂件的规则已移除',  'html[data-perf-mode="lite"] .chat-message-line{content-visibility:auto', 'v71：这条会把顶部挂件从 26px 切到 4px'],
+  ['只判气泡框的旧豁免已修正',  'html[data-perf-mode="lite"] #chatApp:not([data-chat-bubble="custom"]) .chat-message-line{content-visibility', 'v72：漏了主题 CSS 框，从那边贴的挂件仍被切'],
+  /* ⚠ 反向锚点必须查 class 引用/代码原形，不能用中文文案（纪律，已踩 7 次） */
+  ['无差别提速的假守卫已移除',  '*:not([style*="infinite"]){ animation-duration', 'v94：全文 0 个行内 infinite，守卫恒假'],
+  /* ⚠ 锚点不能只写 .chat-typing-dot —— v94 的说明注释里提到了这个名字，
+     会被自己的注释命中而误判。必须用「活规则」独有的形式（带 ] 前缀和 , / { 结尾）。 */
+  ['臆造的动画类名已移除',      '] .chat-voice-record-bar{',             'v94：该类名全文 DOM 引用为 0，规则从未生效'],
+];
+
+function analyse(txt){
+  const build=(txt.match(/MOBIUS_BUILD\s*=\s*'([^']*)'/)||[])[1]||'(读不到)';
+  const pass=[],fail=[];
+  [...CHECKS,...CHECKS60].forEach(([name,needle,desc])=>{
+    (txt.includes(needle)?pass:fail).push([name,desc,needle]);
+  });
+  NEG.forEach(([name,needle,desc])=>{
+    (txt.includes(needle)?fail:pass).push([name,desc,needle]);
+  });
+  return {build,pass,fail,size:txt.length};
+}
+function render(r){
+  const box=document.getElementById('res');
+  const total=CHECKS.length+CHECKS60.length+NEG.length;
+  const good=r.fail.length===0;
+  const isV53=/v109/.test(r.build);
+  let html='';
+  html+=`<div class="verdict ${good?'good':'bad'}">
+    <b>${good?'✅ 这份是 v109，功能齐全':'⚠ 这份不是最新版，缺少下列功能'}</b>
+    通过 ${r.pass.length} / ${total} 项　·　构建号 <code>${esc(r.build)}</code>　·　${(r.size/1048576).toFixed(2)} MB
+  </div>`;
+  html+='<div class="card"><h3>逐项结果</h3>';
+  r.pass.forEach(([n,d])=>{html+=`<div class="row ok"><span class="ic">✓</span><span class="tx"><b>${esc(n)}</b><small>${esc(d)}</small></span></div>`;});
+  r.fail.forEach(([n,d,k])=>{html+=`<div class="row no"><span class="ic">✕</span><span class="tx"><b>${esc(n)}</b><small>${esc(d)}<br>缺少标记：${esc(k)}</small></span></div>`;});
+  html+='</div>';
+  if(!good||!isV53){
+    html+=`<div class="fix"><h3>怎么更新到 v108</h3><ol>
+      <li>确认下载到的包是 <code>约 1.84 MB</code>（1,934,xxx 字节上下）。文件偏小说明下载被截断了，重下。</li>
+      <li>把包里的 <b>index.html 和 sw.js 一起</b>替换掉，只换 index.html 不管用 —— sw.js 里的 <code>CACHE_VERSION</code> 要变成 v108 才会刷新缓存。</li>
+      <li>手机上把已安装的 Möbius <b>彻底关掉</b>（不是切到后台，是从多任务里划掉）。</li>
+      <li>重新打开，等两三秒让 Service Worker 换版。若仍是旧的，在浏览器里清掉该站点数据再进。</li>
+      <li>再回来点一次上面的检测。</li>
+    </ol></div>`;
+  }else{
+    html+=`<div class="fix"><h3>功能齐全，那怎么用</h3><ol>
+      <li>先在<b>全局设置</b>里把接口地址、Key、模型填好并保存 —— 没配好不会出现人设页，这是特意设计的。</li>
+      <li>进<b>查手机</b>，选一位<b>之前没设定过</b>的梦角。</li>
+      <li>会先弹人设页（身份 / 性格 / 习惯 / 往事），填完点保存，接着才是钱夹那三步。</li>
+      <li>已经设定过的梦角不会再弹。想重填的话，进星图后点底部的「<b>人设</b>」按钮。</li>
+      <li>填完在星图底部点「使用 AI 生成」，只会刷新<b>浏览记录 / 备忘录 / 最近常听</b>三项。</li>
+    </ol></div>`;
+  }
+  box.innerHTML=html;
+  box.classList.add('on');
+  box.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fail(msg){
+  const box=document.getElementById('res');
+  box.innerHTML=`<div class="verdict bad"><b>读取失败</b>${esc(msg)}<div class="mini">直接用浏览器打开你的 index.html，全选复制，用上面的「手动粘贴」再试一次。</div></div>`;
+  box.classList.add('on');
+}
+/* ⚠ v94 补：三个按钮里唯独「手动粘贴」调用的 runText 从来没有被定义过，
+   点了必然抛 ReferenceError。而它恰恰是手机用户唯一能走通的路径
+   （file:// 下 runFetch 会被 CORS 挡掉）。 */
+function runText(txt){
+  const t=String(txt||'').trim();
+  if(!t)return fail('粘贴框是空的。请先把 index.html 的内容整份复制进去。');
+  if(!t.includes('MOBIUS_BUILD'))return fail('这段内容里找不到 MOBIUS_BUILD，可能没复制完整，或复制的不是 index.html。');
+  render(analyse(t));
+}
+async function runFetch(url){
+  try{
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    render(analyse(await r.text()));
+  }catch(e){fail('无法读取 '+url+'：'+e.message);}
+}
+async function runLive(){
+  try{
+    if(!('caches' in window))throw new Error('这个浏览器不支持读取缓存');
+    const names=await caches.keys();
+    if(!names.length)throw new Error('没有找到任何缓存，可能还没安装成 PWA');
+    for(const n of names){
+      const c=await caches.open(n);
+      const keys=await c.keys();
+      for(const k of keys){
+        if(/index\.html|\/$/.test(k.url)){
+          const resp=await c.match(k);
+          if(resp){
+            const t=await resp.text();
+            if(t.includes('MOBIUS_BUILD')){
+              const r=analyse(t);
+              r.build+=`（来自缓存 ${n}）`;
+              return render(r);
+            }
+          }
+        }
+      }
+    }
+    throw new Error('缓存里没找到 index.html。缓存名：'+names.join(', '));
+  }catch(e){fail(e.message);}
+}
+</script>
+</body>
+</html>

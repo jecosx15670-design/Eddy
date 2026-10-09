@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>真机自查 · 表情包 / 存储 / 保活 / 梦角名单</title>
+<style>
+  :root{--ink:#22303c;--dim:#6b7c8c;--line:#dfe6ee;--ok:#177a4c;--bad:#c0392b;--warn:#a2650a;--bg:#f4f7fb;--card:#fff}
+  *{box-sizing:border-box}
+  body{margin:0;padding:14px 12px 40px;background:var(--bg);color:var(--ink);
+       font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  h1{font-size:17px;margin:0 0 4px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 12px 10px;margin-bottom:10px;box-shadow:0 2px 8px rgba(34,48,60,.05)}
+  .card h2{font-size:13px;margin:0 0 8px;letter-spacing:.4px;color:#3b5a74;text-transform:uppercase}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed #eef2f7;font-size:13px}
+  .row:last-child{border-bottom:none}
+  .k{color:var(--dim);flex:0 0 auto}
+  .v{text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}
+  .ok{color:var(--ok);font-weight:700}.bad{color:var(--bad);font-weight:700}.warn{color:var(--warn);font-weight:700}
+  button{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;
+         padding:9px 12px;font-size:13px;font-weight:700;margin:6px 6px 0 0}
+  button.primary{background:#22303c;color:#fff;border-color:#22303c}
+  pre{white-space:pre-wrap;word-break:break-all;background:#0f1720;color:#cfe3f5;border-radius:10px;
+      padding:10px;font-size:11px;line-height:1.5;max-height:46vh;overflow:auto;margin:8px 0 0}
+  .hint{font-size:12px;color:var(--dim);margin-top:8px}
+  .big{font-size:15px;font-weight:800}
+</style>
+</head>
+<body>
+<h1>真机自查</h1>
+<div class="sub">把这个文件放到和 <b>index.html 同一个目录</b>，用手机浏览器打开同一个网址：<b>同源</b>才读得到 App 的数据。查完点最下面的「复制结果」，发回给我。</div>
+
+<div class="card"><h2>① 环境</h2><div id="env">检测中…</div></div>
+<div class="card"><h2>② 存储</h2><div id="sto">检测中…</div></div>
+<div class="card"><h2>③ 表情包（你报的「被清空 / 加不上」就看这里）</h2><div id="sti">检测中…</div></div>
+<div class="card"><h2>④ 后台保活（你报的「卡顿/黑屏/关机」就看这里）</h2><div id="ka">检测中…</div></div>
+<div class="card"><h2>⑥ 梦角名单（「运势」里会出现哪些就看这里）</h2><div id="dcc">检测中…</div><div class="hint">「运势」的下拉列表 = 桌面梦角列表逐条投影（注册表只补名字/头像）。这里把每一条列出来，并标出可疑项：名字不是自己起的、handle 不像手动建的、注册表里没有档案、删除名单里有它。</div></div>
+<div class="card"><h2>⑤ 结果</h2>
+  <button class="primary" id="copy">复制结果</button>
+  <button id="again">重新检测</button>
+  <pre id="dump">…</pre>
+  <div class="hint">说明：「复制结果」会把下面这段纯文本发到剪贴板；粘给我就行。</div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var K = {
+  settings:'dream_transmit_chat_settings_v1',
+  histIdx:'dream-messenger:chat-history:v3:index',
+  corners:'dream_transmit_corners_v1',
+  budget:'dream-messenger:keepalive-budget:v1',
+  komo:'dream-messenger:komo-store:v1'
+};
+var DB='dream-messenger-v3', MEDIA_STORE='media', MSG_STORE='chatMessages', MCACHE='mobius-image-resilience-v1';
+var out = { 环境:{}, 存储:{}, 表情包:{}, 保活:{}, 梦角:{} };
+var lines = [];
+
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+function row(k,v,cls){return '<div class="row"><span class="k">'+esc(k)+'</span><span class="v '+(cls||'')+'">'+esc(v)+'</span></div>';}
+function linesOf(o,pre){var r=[];for(var k in o){var v=o[k];r.push((pre||'')+k+': '+(typeof v==='object'?JSON.stringify(v):v));}return r;}
+function say(k,sec,val){out[sec][k]=val;}
+
+function lsCharCount(){var t=0;try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);t+=k.length+String(localStorage.getItem(k)||'').length;}}catch(e){}return t;}
+function withTimeout(p,ms,fallback){return Promise.race([p,new Promise(function(r){setTimeout(function(){r(fallback);},ms);})]);}
+
+/* ── ① 环境 ── */
+async function envCheck(){
+  var ua=navigator.userAgent||'';
+  var standalone=false;
+  try{standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone===true;}catch(e){}
+  var swCtl=false, shells=[];
+  try{swCtl=!!navigator.serviceWorker.controller;}catch(e){}
+  try{ if(window.caches){ var names=await caches.keys(); shells=names.filter(function(n){return /mobius-shell/.test(n);}); } }catch(e){}
+  var est={};
+  try{ if(navigator.storage&&navigator.storage.estimate){ var e=await navigator.storage.estimate(); est={已用MB:+(e.usage/1048576).toFixed(1),配额MB:+(e.quota/1048576).toFixed(0),已用百分比:+(e.usage/e.quota*100).toFixed(2)}; } }catch(e){}
+  var html = row('系统/浏览器', ua)+
+    row('装成 App 打开的？', standalone?'是（standalone）':'否（浏览器标签页）', standalone?'ok':'warn')+
+    row('Service Worker 接管中？', swCtl?'是':'否', swCtl?'ok':'warn')+
+    row('脚本缓存名（看版本号）', shells.join(' / ')||'（没找到）', shells.length?'ok':'warn')+
+    row('屏幕', screen.width+'×'+screen.height+' @'+window.devicePixelRatio+'x（可视 '+innerWidth+'×'+innerHeight+'）')+
+    row('存储用量', JSON.stringify(est))+
+    row('触摸点', navigator.maxTouchPoints||0)+
+    row('电池接口', (navigator.getBattery?'有':'没有'));
+  document.getElementById('env').innerHTML=html;
+  say('UA','环境',ua); say('standalone','环境',standalone); say('SW接管','环境',swCtl);
+  say('脚本缓存名','环境',shells.join(',')||'（无）'); say('屏幕','环境',screen.width+'x'+screen.height);
+  say('存储估算','环境',JSON.stringify(est));
+}
+
+/* ── ② 存储 ── */
+function idbOpen(name,version){
+  return new Promise(function(resolve){
+    var done=false;
+    function fin(v){if(!done){done=true;resolve(v);}}
+    setTimeout(function(){fin({db:null,err:'打开超时（6 秒）'});},6000);
+    try{
+      if(!window.indexedDB){fin({db:null,err:'window.indexedDB 不存在'});return;}
+      var req=indexedDB.open(name,version);
+      req.onsuccess=function(){fin({db:req.result,err:''});};
+      req.onerror=function(){fin({db:null,err:'onerror: '+((req.error&&req.error.name)||'?')});};
+      req.onblocked=function(){fin({db:null,err:'onblocked（被别的标签页占着）'});};
+    }catch(e){fin({db:null,err:'抛异常: '+String(e).slice(0,80)});}
+  });
+}
+function count(db,store){
+  return new Promise(function(resolve){
+    try{ var tx=db.transaction(store,'readonly'), r=tx.objectStore(store).count();
+      r.onsuccess=function(){resolve(r.result);}; r.onerror=function(){resolve('读不到');};
+    }catch(e){resolve('打不开这个表');}
+  });
+}
+async function storageCheck(){
+  var lsOk=false,lsChar=0,lsKeys=0;
+  try{ localStorage.setItem('__selfcheck','1'); localStorage.removeItem('__selfcheck'); lsOk=true; lsKeys=localStorage.length; lsChar=lsCharCount(); }catch(e){}
+  var html = row('localStorage', lsOk?'可用':'不可用（被禁/无痕）', lsOk?'ok':'bad')+
+             row('localStorage 占用', lsChar.toLocaleString()+' 字符 / '+lsKeys+' 个键');
+  say('localStorage可用','存储',lsOk); say('localStorage字符','存储',lsChar); say('localStorage键数','存储',lsKeys);
+
+  var o = await idbOpen(DB,undefined);
+  if(o.db){
+    var mediaN = await count(o.db,MEDIA_STORE), msgN = await count(o.db,MSG_STORE);
+    html += row('IndexedDB（'+DB+'）','能打开', 'ok')+
+            row('　media 表（图片实体）', String(mediaN)+' 条', (typeof mediaN==='number'&&mediaN>0)?'ok':'warn')+
+            row('　chatMessages 表', String(msgN)+' 条');
+    say('IndexedDB','存储','可打开'); say('media条数','存储',mediaN); say('chatMessages条数','存储',msgN);
+    try{o.db.close();}catch(e){}
+  }else{
+    html += row('IndexedDB（'+DB+'）','打不开：'+o.err, 'bad');
+    say('IndexedDB','存储','打不开：'+o.err);
+  }
+
+  var cacheList=[];
+  try{ if(window.caches){ var names=await caches.keys();
+      for(var i=0;i<names.length;i++){ var c=await caches.open(names[i]); var ks=await c.keys(); cacheList.push(names[i]+'('+ks.length+')'); }
+  } }catch(e){ cacheList.push('读不到：'+String(e).slice(0,40)); }
+  html += row('Cache Storage', cacheList.join(' · ')||'（空）', /resilience/.test(cacheList.join(''))?'ok':'warn');
+  say('CacheStorage','存储',cacheList.join(' · '));
+
+  var keyRows='';
+  for(var name in K){
+    var raw=null; try{raw=localStorage.getItem(K[name]);}catch(e){}
+    keyRows += row('键 '+K[name], raw==null?'（没有）':(raw.length+' 字符'), raw==null?'warn':'ok');
+    say('键-'+name,'存储', raw==null?'没有':(raw.length+'字符'));
+  }
+  document.getElementById('sto').innerHTML = html + '<div class="hint">关键键清单</div>' + keyRows;
+}
+
+/* ── ③ 表情包 ── */
+function mediaIdOf(src){ return String(src||'').indexOf('dream-media://')===0 ? src.slice('dream-media://'.length) : ''; }
+function idbGetMedia(id){
+  return new Promise(function(resolve){
+    var done=false; function fin(v){if(!done){done=true;resolve(v);}}
+    setTimeout(function(){fin(null);},6000);
+    try{
+      var req=indexedDB.open(DB);
+      req.onsuccess=function(){
+        var db=req.result;
+        try{
+          var tx=db.transaction(MEDIA_STORE,'readonly'), g=tx.objectStore(MEDIA_STORE).get(id);
+          g.onsuccess=function(){fin(g.result||null);}; g.onerror=function(){fin(null);};
+        }catch(e){fin(null);}
+      };
+      req.onerror=function(){fin(null);};
+    }catch(e){fin(null);}
+  });
+}
+async function cacheGetMedia(id){
+  try{
+    if(!window.caches) return null;
+    var c=await caches.open(MCACHE);
+    var r=await c.match(new Request('https://mobius.local/__media_cache__/'+encodeURIComponent(id)));
+    if(!r) return null;
+    return await r.blob();
+  }catch(e){return null;}
+}
+function decodeTest(blob){
+  return new Promise(function(resolve){
+    try{
+      var url=URL.createObjectURL(blob), img=new Image(), done=false;
+      function fin(ok){if(!done){done=true;try{URL.revokeObjectURL(url);}catch(e){}resolve(ok);}}
+      setTimeout(function(){fin(false);},4000);
+      img.onload=function(){fin(true);}; img.onerror=function(){fin(false);};
+      img.src=url;
+    }catch(e){resolve(false);}
+  });
+}
+async function stickerCheck(){
+  var raw=null; try{raw=localStorage.getItem(K.settings);}catch(e){}
+  if(!raw){ document.getElementById('sti').innerHTML=row('聊天设置','读不到（这个页面和 App 同源吗？）','bad'); say('聊天设置','表情包','读不到'); return; }
+  var all={}; try{all=JSON.parse(raw)||{};}catch(e){ document.getElementById('sti').innerHTML=row('聊天设置','解析失败','bad'); return; }
+  var handles=Object.keys(all), html='', sumMine=0,sumTheirs=0,sumImg=0,sumRef=0,missing=0,okCnt=0,anyRooms=0;
+  var detailLines=[];
+  for(var i=0;i<handles.length;i++){
+    var h=handles[i], s=all[h]||{};
+    var mine=Array.isArray(s.stickerMine)?s.stickerMine:[], theirs=Array.isArray(s.stickerTheirs)?s.stickerTheirs:[];
+    var imgs=mine.concat(theirs).filter(function(x){return x&&x.src;});
+    if(!imgs.length && !mine.length && !theirs.length) continue;
+    anyRooms++;
+    sumMine+=mine.length; sumTheirs+=theirs.length; sumImg+=imgs.length;
+    html += row('房间 '+h, '我 '+mine.length+' 个 / 对方 '+theirs.length+' 个', 'ok');
+    detailLines.push('房间 '+h+': 我 '+mine.length+' 个 / 对方 '+theirs.length+' 个');
+    for(var j=0;j<imgs.length && j<8;j++){
+      var it=imgs[j], src=String(it.src||''), mid=mediaIdOf(src), verdict='', cls='';
+      if(mid){
+        sumRef++;
+        var rec=await idbGetMedia(mid), inCache=null, dec=false;
+        if(rec&&rec.blob){ dec=await decodeTest(rec.blob); verdict='图在（IndexedDB'+(rec.blob.size?(' '+Math.round(rec.blob.size/1024)+'KB'):'')+'）'+(dec?' · 能显示':' · 但显示不出来'); cls=dec?'ok':'warn'; if(dec) okCnt++; else missing++; }
+        else { inCache=await cacheGetMedia(mid);
+          if(inCache){ dec=await decodeTest(inCache); verdict='图在（缓存兜底 '+(Math.round(inCache.size/1024))+'KB）'+(dec?' · 能显示':' · 显示不出来'); cls=dec?'ok':'warn'; if(dec) okCnt++; else missing++; }
+          else { verdict='图没了（数据库和缓存里都没有）'; cls='bad'; missing++; } }
+        detailLines.push('  · '+String(it.name||'未命名').slice(0,18)+' ['+mid.slice(0,18)+'…] '+verdict);
+      } else if(/^data:/.test(src)){
+        verdict='内嵌图（'+Math.round(src.length/1024)+'KB 字符）'; cls='ok'; okCnt++;
+        detailLines.push('  · '+String(it.name||'未命名').slice(0,18)+' '+verdict);
+      } else if(/^blob:|^https?:/.test(src)){
+        verdict='外部链接'; cls='warn'; detailLines.push('  · '+String(it.name||'未命名').slice(0,18)+' 外部链接');
+      } else { verdict='不认识的引用'; cls='warn'; detailLines.push('  · '+String(it.name||'未命名').slice(0,18)+' 不认识的引用'); }
+      html += row('　└ '+String(it.name||'未命名').slice(0,16), verdict, cls);
+    }
+  }
+  if(!anyRooms) html = row('表情包','一条都没读到（可能真被清空了，也可能是没同源）','warn');
+  html = row('汇总', '我的 '+sumMine+' / 对方 '+sumTheirs+' / 带图 '+sumImg+' / 图片在库里 '+okCnt+' / 读不出 '+missing, missing?'bad':'ok') + html;
+  html += '<div class="hint">「图在（IndexedDB）」= 你添加的表情包本体还在，刷新后应该正常显示；「图没了」= 系统把图片数据清掉了，槽位还在但显示不出来（新版本会显示「图没了」占位，删掉重加即可）。</div>';
+  document.getElementById('sti').innerHTML=html;
+  say('表情包汇总','表情包',{我的:sumMine,对方的:sumTheirs,带图:sumImg,图片在库里:okCnt,读不出:missing,房间数:anyRooms});
+  detailLines.forEach(function(l){ lines.push('  '+l); });
+}
+
+/* ── ④ 保活 ── */
+async function kaCheck(){
+  var raw=null; try{raw=localStorage.getItem(K.budget);}catch(e){}
+  var today=new Date(), day=today.getFullYear()+'-'+(today.getMonth()+1)+'-'+today.getDate();
+  var html='', used=0, valid=false;
+  if(raw){ try{ var o=JSON.parse(raw); if(o&&o.day===day&&isFinite(Number(o.ms))){used=Number(o.ms);valid=true;} }catch(e){} }
+  html += row('今日保活累计', Math.round(used/60000)+' / 90 分钟'+(valid?'':'（没有今天的记录＝今天还没保活过，或数据被清了）'), valid?'ok':'warn');
+  html += row('记录日期', raw?(function(){try{return JSON.parse(raw).day;}catch(e){return '读不出';}})():'（还没写过）');
+  say('今日保活分钟','保活',Math.round(used/60000)); say('保活记录存在','保活',!!raw);
+  var bat='（这台设备/浏览器不提供电池信息）';
+  try{
+    if(navigator.getBattery){
+      var b=await navigator.getBattery();
+      bat='电量 '+Math.round(b.level*100)+'% · '+(b.charging?'充电中':'没充电')+(b.level<=0.2&&!b.charging?' → 新版本在这种情况下会自动暂停保活':'');
+      say('电量','保活',Math.round(b.level*100)+'%'); say('充电中','保活',b.charging);
+    }
+  }catch(e){}
+  html += row('电池', bat);
+  html += '<div class="hint">实时状态（运行中 / 待启动 / 为什么停）在主 App 里看：设置 → 通知 → ③ 后台与保活 → 「后台保活」那行小字。新版本规则：手机累计保活 15 分钟自动歇 30 分钟，一天最多 90 分钟，电量 ≤20% 且没充电不保活。</div>';
+  document.getElementById('ka').innerHTML=html;
+}
+
+/* ── ⑥ 梦角名单：运势里会出现哪些（与 App 同逻辑的逐条投影） ── */
+var SAFE_PREFIX='dream-safe-v1:', LZW_PREFIX='~dream-lzw-v1~';
+var ROLES_KEY='dream-messenger:roles:v1', DELETED_KEY='dream-messenger:deleted-dream-corners:v1';
+function safeSnapKey(kind,key){ return SAFE_PREFIX+kind+':'+encodeURIComponent(key); }
+function readRawSmart(key){
+  var raw=null;
+  try{ raw=localStorage.getItem(key); }catch(e){}
+  if(raw===null){
+    try{ if(!localStorage.getItem(safeSnapKey('deleted',key))) raw=localStorage.getItem(safeSnapKey('backup',key)); }catch(e){}
+  }
+  return raw;
+}
+/* 与 App 的 decompressDreamJSONString 同一算法（>20000 字符的键会被 LZW 压过） */
+function unlzw(stored){
+  var s=String(stored==null?'':stored);
+  if(s.indexOf(LZW_PREFIX)!==0) return s;
+  try{
+    var data=s.slice(LZW_PREFIX.length); if(!data) return '';
+    var dictionary=[],currentCode=data.charCodeAt(0),oldPhrase=String.fromCharCode(currentCode),character=oldPhrase,code=256,output=[oldPhrase];
+    for(var index=1;index<data.length;index+=1){
+      currentCode=data.charCodeAt(index);
+      var phrase=currentCode<256?String.fromCharCode(currentCode):(dictionary[currentCode]!==undefined?dictionary[currentCode]:oldPhrase+character);
+      output.push(phrase); character=phrase[0];
+      if(code<65535) dictionary[code++]=oldPhrase+character; else { dictionary=[]; code=256; }
+      oldPhrase=phrase;
+    }
+    var binary=output.join(''),bytes=new Uint8Array(binary.length);
+    for(var k=0;k<binary.length;k+=1) bytes[k]=binary.charCodeAt(k);
+    return new TextDecoder().decode(bytes);
+  }catch(e){ return ''; }
+}
+function readListSmart(key){
+  var raw=readRawSmart(key);
+  if(raw===null) return {list:[],raw:'',compressed:false};
+  var text=unlzw(raw),v=null;
+  try{ v=JSON.parse(text); }catch(e){}
+  return {list:Array.isArray(v)?v:[],raw:text,compressed:String(raw).indexOf(LZW_PREFIX)===0};
+}
+function tombstoneSet(){ return readListSmart(DELETED_KEY).list.map(String).filter(Boolean); }
+function cornerIsDeleted(id,handle,tombs){
+  var mine=[id,handle].map(function(x){return String(x==null?'':x).trim();}).filter(Boolean);
+  if(!mine.length) return false;
+  for(var i=0;i<tombs.length;i+=1){
+    var sides=String(tombs[i]).split('::').map(function(x){return String(x==null?'':x).trim();}).filter(Boolean);
+    for(var j=0;j<sides.length;j+=1){ if(mine.indexOf(sides[j])>=0) return true; }
+  }
+  return false;
+}
+async function cornerCheck(){
+  var cr=readListSmart(K.corners), rr=readListSmart(ROLES_KEY), tombs=tombstoneSet();
+  var corners=cr.list, roles=rr.list;
+  var byId={}, used={}; roles.forEach(function(r){ if(r&&r.id) byId[String(r.id)]=r; });
+  var shown=[], skipped=[], details=[], weird=[];
+  corners.forEach(function(c){
+    if(!c||typeof c!=='object'||!c.id){ weird.push('没有 id 的条目：'+String(JSON.stringify(c)).slice(0,80)); return; }
+    var handle=String(c.handle||c.id||'').trim(), name=String(c.name||'').trim();
+    used[handle]=true;
+    var role=byId[handle]||null;
+    var shownName= role ? (role.activeNickname||role.remark||role.name||'当前梦角') : (name||'未命名角色');
+    var flags=[];
+    if(!name) flags.push('没有名字 → 运势会忽略这条');
+    if(handle.indexOf('dream.')!==0) flags.push('handle 不是手动建的样式（手动建的必是 dream.xxx）');
+    if(!role) flags.push('注册表里没有档案 → 运势会就地新建一个');
+    else if(role.activeNickname&&String(role.activeNickname)!==name) flags.push('当前昵称在生效：显示「'+role.activeNickname+'」，角名是「'+name+'」');
+    var dead=cornerIsDeleted(c.id,c.handle,tombs);
+    if(dead) flags.push('删除名单里有它 → 运势会跳过');
+    var willShow=!dead&&!!name;
+    details.push({角名:name||'（空）',handle:handle||'（空）',显示:willShow?shownName:'（不出现）',标志:flags.length?flags.join('；'):'正常',raw:c});
+    if(willShow) shown.push(shownName); else skipped.push((name||handle||'（无名）')+(dead?'（已删除）':'（无名字）'));
+  });
+  var internal=roles.filter(function(r){ return r&&r.id&&String(r.id).indexOf('dream.')!==0&&!used[String(r.id)]; });
+  var html='';
+  html+=row('运势下拉会出现', shown.length? (shown.length+' 条：'+shown.join(' / ')) : '0 条（显示空态）', shown.length?'ok':'warn');
+  html+=row('角名单原始条数', String(corners.length)+' 条'+(cr.compressed?'（存储里是压缩格式，已解压）':''));
+  if(skipped.length) html+=row('会被跳过的', skipped.join(' / '), 'warn');
+  if(internal.length) html+=row('注册表里的非梦角角色（运势不会列）', String(internal.length)+' 个：'+internal.slice(0,10).map(function(r){return String(r.id)+'（'+String(r.name||r.remark||'无名')+'）';}).join('，')+(internal.length>10?' …':''), 'warn');
+  if(weird.length) html+=row('异常条目', weird.join(' / '), 'bad');
+  details.forEach(function(d,i){
+    var cls = d.标志==='正常' ? 'ok' : (d.标志.indexOf('跳过')>=0 ? 'bad' : 'warn');
+    html+=row((i+1)+'. 角名「'+d.角名+'」', '运势显示「'+d.显示+'」 ｜ handle='+d.handle+(d.标志==='正常'?'':' ｜ '+d.标志), cls);
+  });
+  document.getElementById('dcc').innerHTML=html;
+  say('运势下拉会出现','梦角',shown.join(' / ')||'（0 条）');
+  say('角名单原始条数','梦角',corners.length);
+  say('逐条明细','梦角',details.map(function(d){return '角名「'+d.角名+'」→运势显示「'+d.显示+'」｜handle='+d.handle+'｜'+d.标志;}));
+  say('注册表非梦角角色','梦角',internal.map(function(r){return String(r.id);}));
+  say('删除名单','梦角',tombs.join(' '));
+  say('角名单原始JSON（截断）','梦角',String(cr.raw||'').slice(0,1200));
+}
+
+/* ── ⑤ 汇总 + 复制 ── */
+function buildDump(){
+  var L=[];
+  L.push('=== 真机自查结果 ===');
+  L.push('时间: '+new Date().toLocaleString());
+  L.push('— 环境 —'); linesOf(out.环境,'  ').forEach(function(x){L.push('  '+x);});
+  L.push('— 存储 —'); linesOf(out.存储,'  ').forEach(function(x){L.push('  '+x);});
+  L.push('— 表情包 —'); linesOf(out.表情包,'  ').forEach(function(x){L.push('  '+x);});
+  L.push('— 保活 —'); linesOf(out.保活,'  ').forEach(function(x){L.push('  '+x);});
+  L.push('— 梦角名单 —'); linesOf(out.梦角,'  ').forEach(function(x){L.push('  '+x);});
+  return L.join('\n');
+}
+async function runAll(){
+  lines=[]; out={环境:{},存储:{},表情包:{},保活:{},梦角:{}};
+  ['env','sto','sti','ka','dcc'].forEach(function(id){document.getElementById(id).innerHTML='检测中…';});
+  try{ await envCheck(); }catch(e){ say('环境检测出错','环境',String(e).slice(0,80)); }
+  try{ await storageCheck(); }catch(e){ say('存储检测出错','存储',String(e).slice(0,80)); }
+  try{ await stickerCheck(); }catch(e){ say('表情包检测出错','表情包',String(e).slice(0,80)); }
+  try{ await kaCheck(); }catch(e){ say('保活检测出错','保活',String(e).slice(0,80)); }
+  try{ await cornerCheck(); }catch(e){ say('梦角名单检测出错','梦角',String(e).slice(0,80)); }
+  document.getElementById('dump').textContent = buildDump() + (lines.length?('\n— 逐张明细 —\n'+lines.join('\n')):'');
+}
+document.getElementById('copy').addEventListener('click',async function(){
+  var text=document.getElementById('dump').textContent||'';
+  try{ await navigator.clipboard.writeText(text); this.textContent='已复制 ✓'; }
+  catch(e){
+    try{ var ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); this.textContent='已复制 ✓'; }
+    catch(e2){ this.textContent='复制失败，请手动全选'; }
+  }
+  var btn=this; setTimeout(function(){btn.textContent='复制结果';},2500);
+});
+document.getElementById('again').addEventListener('click',runAll);
+runAll();
+})();
+</script>
+</body>
+</html>

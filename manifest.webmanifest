@@ -1,0 +1,105 @@
+{
+  "id": "/Eddy/",
+  "name": "Eddy@01567",
+  "short_name": "Eddy@01567",
+  "description": "单文件本地优先 PWA · 梦境信使：聊天、梦笺、朋友圈、桌面与 KOMO 钱包，全部数据保存在本机。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
+  "orientation": "portrait",
+  "background_color": "#111318",
+  "theme_color": "#111318",
+  "categories": [
+    "social",
+    "lifestyle",
+    "entertainment"
+  ],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "./icons/favicon-64.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "CHAT 私信",
+      "short_name": "CHAT",
+      "description": "打开聊天列表",
+      "url": "./#route=chat",
+      "icons": [
+        {
+          "src": "./icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "MAIL 信笺",
+      "short_name": "MAIL",
+      "description": "查看与撰写信笺",
+      "url": "./#route=mail",
+      "icons": [
+        {
+          "src": "./icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "朋友圈",
+      "short_name": "CIRCLE",
+      "description": "查看最新动态",
+      "url": "./#route=circle",
+      "icons": [
+        {
+          "src": "./icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "MOON 记录",
+      "short_name": "MOON",
+      "description": "打开经期记录",
+      "url": "./#route=moon",
+      "icons": [
+        {
+          "src": "./icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}
